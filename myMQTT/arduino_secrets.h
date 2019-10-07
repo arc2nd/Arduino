@@ -6,5 +6,5 @@
 
 #define AIO_SERVER      "<MQTT server>"
 #define AIO_SERVERPORT  <MQTT port>
-#define AIO_USERNAME    "MQTT username" 
-#define AIO_KEY         "MQTT password" 
+#define AIO_USERNAME    "<MQTT username>" 
+#define AIO_KEY         "<MQTT password>" 

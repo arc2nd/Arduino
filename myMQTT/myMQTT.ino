@@ -47,7 +47,7 @@ Adafruit_MQTT_Publish onoffstatus = Adafruit_MQTT_Publish(&mqtt,  AIO_USERNAME "
 Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/onoff_test");
 
 Adafruit_MQTT_Publish tempFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temperature");
-
+Adafruit_MQTT_Publish humFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humidity");
 uint32_t prevTime;
 
 void setup() {
@@ -99,6 +99,13 @@ void loop() {
   //printCurrentNet();
   uint32_t t = 0;
   MQTT_connect();
+  
+  // Do the temperature reading
+  t = millis();
+  if ((t - prevTime) > 60000) { // Every 1 minutes
+    read_temp();
+    prevTime = t;
+  }
 
   // this is our 'wait for incoming subscription packets' busy subloop
   Adafruit_MQTT_Subscribe *subscription;
@@ -117,13 +124,6 @@ void loop() {
       }
       Serial.println(light_state);
       onoffstatus.publish(light_state);
-    }
-    
-    // Do the temperature reading
-    t = millis();
-    if ((t - prevTime) > 600000) { // Every 10 minutes
-      read_temp();
-      prevTime = t;
     }
   }
 }
@@ -238,6 +238,8 @@ void read_temp() {
   Serial.print("Sample OK: ");
   Serial.print((int)temperature); Serial.print(" *C, "); 
   Serial.print((int)humidity); Serial.println(" H");
-  uint32_t toPub = (uint32_t)temperature;
-  tempFeed.publish(toPub);
+  uint32_t tempPub = (uint32_t)temperature;
+  tempFeed.publish(tempPub);
+  uint32_t humPub = (uint32_t)humidity;
+  humFeed.publish(humPub);
 }
