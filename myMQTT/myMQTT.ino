@@ -23,20 +23,52 @@
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 
-// begin sensor includes
+// begin sensor includes and declaration
 #include <SimpleDHT.h>
 #define pinDHT11 2
 SimpleDHT11 dht11(pinDHT11);
 
-// begin neopixel includes
+// begin neopixel includes and declarations
 #include <Adafruit_NeoPixel.h>
-#define lightPIN 3
+#define ledPin 9
+#define ledCount 3
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(ledCount, ledPin, NEO_GRB + NEO_KHZ800);
+// Argument 1 = Number of pixels in NeoPixel strip
+// Argument 2 = Arduino pin number (most are valid)
+// Argument 3 = Pixel type flags, add together as needed:
+//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
+//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
+//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
+//   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
+
+// activity booleans
+bool temp_active = false;
+bool mqtt_active = true;
+bool lights_active = true;
 
 // arduino_secrets.h is where we're storing our login info
 #include "arduino_secrets.h" 
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 int status = WL_IDLE_STATUS;     // the WiFi radio's status
+
+// global variables
+uint32_t prevTime; //a variable to hold a time in milliseconds
+uint32_t light_state = 0; //a variable to hold the state of the blinky light we're switching on/off
+
+
+// neopixel variables
+int i = 0;
+int p;
+int light_mode = 2;
+int max_r = 255;
+int max_g = 128;
+int max_b = 128;
+int light_step = 1;
+int light_delay = 90;
+int tar[ledCount][3]; // target colors
+int cur[ledCount][3]; // current colors
 
 
 /************************* Ethernet Client Setup *****************************/
@@ -58,7 +90,6 @@ Adafruit_MQTT_Client mqtt(&wClient, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AI
 // You don't need to change anything below this line!
 #define halt(s) { Serial.println(F( s )); while(1);  }
 
-
 /****************************** Feeds ***************************************/
 // Create the feeds that we will publish/subscribe to
 // I'm using io.adafruit.com here, but it has been tested with a local Mosquitto broker
@@ -67,7 +98,7 @@ Adafruit_MQTT_Client mqtt(&wClient, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AI
 
 // Subscribes
 Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/onoff_test");
-
+Adafruit_MQTT_Subscribe modeslider = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/mode");
 
 // Publishes
 Adafruit_MQTT_Publish onoffstatus = Adafruit_MQTT_Publish(&mqtt,  AIO_USERNAME "/feeds/onoff_status");
@@ -75,84 +106,6 @@ Adafruit_MQTT_Publish tempFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/fee
 Adafruit_MQTT_Publish humFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humidity");
 
 
-
-uint32_t prevTime; //a variable to hold a time in milliseconds
-uint32_t light_state = 0; //a variable to hold the state of the light we're switching on/off
-
-
-void setup() {
-  // Initialize serial and wait for port to open:
-  pinMode(LED_BUILTIN, OUTPUT);
-  Serial.begin(9600);
-  /*while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }*/
-
-  // check for the presence of the shield:
-  if (WiFi.status() == WL_NO_SHIELD) {
-    Serial.println("WiFi shield not present");
-    // don't continue:
-    while (true);
-  }
-
-  // attempt to connect to WiFi network:
-  while ( status != WL_CONNECTED) {
-    Serial.print("Attempting to connect to WPA SSID: ");
-    Serial.println(ssid);
-    // Connect to WPA/WPA2 network:
-    status = WiFi.begin(ssid, pass); //if no password needed, get rid of pass, don't leave it empty
-
-    // wait 10 seconds for connection:
-    delay(10000);
-  }
-  
-  // you're connected now, so print out the data:
-  Serial.print("You're connected to the network");
-  printCurrentNet();
-  printWiFiData();
-
-  // MQTT section
-  Serial.print(F("\nInit the Client as ..."));
-  Serial.println(AIO_USERNAME);
-  //Ethernet.begin(mac);
-  //delay(1000); //give the ethernet a second to initialize
-  
-  mqtt.subscribe(&onoffbutton);
-  prevTime = millis();
-}
-
-
-void loop() {
-  uint32_t t = 0;
-  MQTT_connect();
-  
-  // Do the temperature reading
-  t = millis();
-  if ((t - prevTime) > 600000) { // Every 10 minutes
-    read_temp();
-    prevTime = t;
-  }
-
-  // this is our 'wait for incoming subscription packets' busy subloop
-  Adafruit_MQTT_Subscribe *subscription;
-  while ((subscription = mqtt.readSubscription(1000))) {
-    if (subscription == &onoffbutton) {
-      Serial.print(F("Got: "));
-      Serial.println((char *)onoffbutton.lastread);
-      if (strcmp((char *)onoffbutton.lastread, "ON") == 0) {
-        turn_on();
-      }
-      if (strcmp((char *)onoffbutton.lastread, "OFF") == 0) {
-        turn_off();
-      }
-      if (strcmp((char *)onoffbutton.lastread, "TGL") == 0) {
-        toggle();
-      }
-      Serial.println(light_state);
-      onoffstatus.publish(light_state);
-    }
-  }
-}
 
 // things to do when turning the light on
 void turn_on() {
@@ -269,10 +222,270 @@ void read_temp() {
   }
   
   Serial.print("Sample OK: ");
-  Serial.print((int)temperature); Serial.print(" *C, "); 
-  Serial.print((int)humidity); Serial.println(" H");
-  uint32_t tempPub = (uint32_t)temperature;
+  Serial.print((float)temperature); Serial.print(" *C, "); 
+  Serial.print((float)humidity); Serial.println(" H");
+  float tempPub = ((float)temperature * (9.0/5.0)) + 32.0;
+  Serial.println(tempPub);
   tempFeed.publish(tempPub);
   uint32_t humPub = (uint32_t)humidity;
   humFeed.publish(humPub);
+}
+
+void rand_color(int (&color)[3]) {
+  int remainder_one = 255 - (int)color[0];
+  int this_green = random(remainder_one);
+  int this_blue = remainder_one - this_green;
+  color[1] = this_green;
+  color[2] = this_blue;
+}
+
+void setup() {
+  // Initialize serial and wait for port to open:
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  Serial.begin(9600);
+  /*while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }*/
+
+  // check for the presence of the shield:
+  if (WiFi.status() == WL_NO_SHIELD) {
+    Serial.println("WiFi shield not present");
+    // don't continue:
+    while (true);
+  }
+
+  // attempt to connect to WiFi network:
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA/WPA2 network:
+    status = WiFi.begin(ssid, pass); //if no password needed, get rid of pass, don't leave it empty
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+  
+  // you're connected now, so print out the data:
+  Serial.print("You're connected to the network");
+  printCurrentNet();
+  printWiFiData();
+
+  // MQTT section
+  if (mqtt_active) {
+    Serial.println("MQTT active");
+    Serial.print(F("\nInit the Client as ..."));
+    Serial.println(AIO_USERNAME);
+    //Ethernet.begin(mac);
+    //delay(1000); //give the ethernet a second to initialize
+    mqtt.subscribe(&onoffbutton);
+    mqtt.subscribe(&modeslider);
+  }
+
+  if (lights_active) {
+    int tmp_col[3] = {random(max_r), 0, 0};
+    // load up the target and current colors array
+    for (p=0; p<ledCount; p++) {
+      rand_color(tmp_col);
+      tar[p][0] = tmp_col[0];
+      tar[p][1] = tmp_col[1];
+      tar[p][2] = tmp_col[2];
+      //tar[p][0] = random(max_r);
+      //tar[p][1] = random(max_g);
+      //tar[p][2] = random(max_b);
+    }
+    tmp_col[0] = random(max_r);
+    tmp_col[1] = 0;
+    tmp_col[2] = 0;
+    for (p=0; p<ledCount; p++) {
+      rand_color(tmp_col);
+      cur[p][0] = tmp_col[0];
+      cur[p][1] = tmp_col[1];
+      cur[p][2] = tmp_col[2];
+      //cur[p][0] = random(max_r);
+      //cur[p][1] = random(max_g);
+      //cur[p][2] = random(max_b);
+    }
+
+    pixels.begin();
+    pixels.show();
+    Serial.println("lights active...");
+    delay(1000);
+    pixels.setBrightness(255); // brightness 0-255
+    pixels.show();
+  }
+
+  prevTime = millis();
+}
+
+
+void loop() {
+  uint32_t t = 0;
+  
+  // Do the temperature reading
+  t = millis();
+  if (temp_active) {
+    if ((t - prevTime) > 600000) { // Every 10 minutes
+      read_temp();
+      prevTime = t;
+    }
+  }
+  
+  // this is our 'wait for incoming subscription packets' busy subloop
+  if (mqtt_active) {
+    MQTT_connect();
+    Adafruit_MQTT_Subscribe *subscription;
+    while ((subscription = mqtt.readSubscription(125))) {
+      if (subscription == &onoffbutton) {
+        Serial.print(F("Got: "));
+        Serial.println((char *)onoffbutton.lastread);
+        if (strcmp((char *)onoffbutton.lastread, "ON") == 0) {
+          turn_on();
+        }
+        if (strcmp((char *)onoffbutton.lastread, "OFF") == 0) {
+          turn_off();
+        }
+        if (strcmp((char *)onoffbutton.lastread, "TGL") == 0) {
+          toggle();
+        }
+        //Serial.println(light_state);
+        onoffstatus.publish(light_state);
+      }
+      if (subscription == &modeslider) {
+        Serial.println((char *)modeslider.lastread);
+        if (!strcmp((char *)modeslider.lastread, "0")) {
+          Serial.println("compare 0");
+          light_mode = 0;
+        }
+        if (!strcmp((char *)modeslider.lastread, "1")) {
+          Serial.println("compare 1");
+          light_mode = 1;
+        }
+        if (!strcmp((char *)modeslider.lastread, "2")) {
+          Serial.println("compare 2");
+          light_mode = 2;
+        }
+        if (!strcmp((char *)modeslider.lastread, "3")) {
+          Serial.println("compare 3");
+          light_mode = 3;
+        }
+        Serial.print("Current mode: ");
+        Serial.println(light_mode);
+      }
+    }
+  }
+
+  if (lights_active) {
+    int p; // current pixel
+    delay(light_delay);
+
+
+    if (light_mode == 0) { // off
+      for (p=0; p<ledCount; p++) {
+        pixels.setPixelColor(p, 0, 0, 0);
+      }
+    }
+    if (light_mode == 1) { // each pixel random colors
+      light_delay = 0;
+      for (p=0; p<ledCount; p++) {
+        pixels.setPixelColor(p, cur[p][0], cur[p][1], cur[p][2]);
+  
+        // move this pixel's red closer to target
+        if (cur[p][0] > tar[p][0]) {
+          cur[p][0]--;
+        }
+        else if (cur[p][0] < tar[p][0]) {
+          cur[p][0] = cur[p][0] + light_step;
+        }
+        else {
+          tar[p][0] = random(max_r);
+        }
+  
+        // move this pixel's green closer to target
+        if (cur[p][1] > tar[p][1]) {
+          cur[p][1]--;
+        }
+        else if (cur[p][1] < tar[p][1]) {
+          cur[p][1] = cur[p][1] + light_step;
+        }
+        else {
+          tar[p][1] = random(max_g);
+        }
+  
+        if (cur[p][2] > tar[p][2]) {
+          cur[p][2]--;
+        }
+        else if (cur[p][2] < tar[p][2]) {
+          cur[p][2] = cur[p][2] + light_step;
+        }
+        else {
+          tar[p][2] = random(max_b);
+        }
+      }
+    }
+    if (light_mode == 2) { // all pixels same random colors
+      light_delay = 0;
+      for (p=0; p<ledCount; p++) {
+        pixels.setPixelColor(p, cur[0][0], cur[0][1], cur[0][2]);
+      }
+      // move this pixel's red closer to target
+      if (cur[0][0] > tar[0][0]) {
+        cur[0][0]--;
+      }
+      else if (cur[0][0] < tar[0][0]) {
+        cur[0][0] = cur[0][0] + light_step;
+      }
+      else {
+        tar[0][0] = random(max_r);
+      }
+
+      // move this pixel's green closer to target
+      if (cur[0][1] > tar[0][1]) {
+        cur[0][1]--;
+      }
+      else if (cur[0][1] < tar[0][1]) {
+        cur[0][1] = cur[0][1] + light_step;
+      }
+      else {
+        tar[0][1] = random(max_g);
+      }
+
+      if (cur[0][2] > tar[0][2]) {
+        cur[0][2]--;
+      }
+      else if (cur[0][2] < tar[0][2]) {
+        cur[0][2] = cur[0][2] + light_step;
+      }
+      else {
+        tar[0][2] = random(max_b);
+      }
+    }
+    if (light_mode == 3) { // cylon chase
+      light_delay = 125;
+      for (p=0; p<ledCount; p++) {
+        if (p == i) {
+          pixels.setPixelColor(p, max_r, 0, 0);
+        }
+        else {
+          pixels.setPixelColor(p, 0, 0, 0);
+        }
+      }
+    }
+  }
+
+  /*for (p=0; p<ledCount; p++) {
+    pixels.setPixelColor(p, 0, 0, 0);
+    //pixels.show();
+  }
+  pixels.setPixelColor(i, random(255), random(255), random(255));
+  */
+  pixels.show();
+
+  if (i>=(ledCount-1)) {
+    i = 0;
+    //Serial.println("resetting i");
+  }
+  else {
+    i++;
+  }
 }
