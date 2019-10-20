@@ -11,7 +11,6 @@
 //    SSID/password and the MQTT broker info
 // TODO: write SSID/password and MQTT broker info to 
 //    EEPROM
-// TODO: instead of just pins, control some neopixels
 
 // begin wifi includes
 #include <SPI.h>
@@ -239,6 +238,97 @@ void rand_color(int (&color)[3]) {
   color[2] = this_blue;
 }
 
+void move_closer(int p, int (&cur)[ledCount][3], int (&tar)[ledCount][3], int light_step) {
+  // move this pixel's red closer to target
+  if (cur[p][0] > tar[p][0]) {
+    cur[p][0]--;
+  }
+  else if (cur[p][0] < tar[p][0]) {
+    cur[p][0] = cur[p][0] + light_step;
+  }
+  else {
+    tar[p][0] = random(max_r);
+  }
+
+  // move this pixel's green closer to target
+  if (cur[p][1] > tar[p][1]) {
+    cur[p][1]--;
+  }
+  else if (cur[p][1] < tar[p][1]) {
+    cur[p][1] = cur[p][1] + light_step;
+  }
+  else {
+    tar[p][1] = random(max_g);
+  }
+
+  // move this pixel's blue closer to target
+  if (cur[p][2] > tar[p][2]) {
+    cur[p][2]--;
+  }
+  else if (cur[p][2] < tar[p][2]) {
+    cur[p][2] = cur[p][2] + light_step;
+  }
+  else {
+    tar[p][2] = random(max_b);
+  }
+}
+
+void random_color_indiv(int (&current)[ledCount][3], int (&target)[ledCount][3], int light_step) {
+  for (p=0; p<ledCount; p++) {
+    pixels.setPixelColor(p, current[p][0], current[p][1], current[p][2]);
+    move_closer(p, current, target, light_step);
+  }
+}
+
+
+void random_color_all(int (&current)[ledCount][3], int (&target)[ledCount][3], int light_step) {
+  for (p=0; p<ledCount; p++) {
+    pixels.setPixelColor(p, current[0][0], current[0][1], current[0][2]);
+  }
+  move_closer(0, current, target, light_step);
+}
+
+
+void cylon_chase(int i) {
+  for (p=0; p<ledCount; p++) 
+  {
+    if (p == i) {
+      pixels.setPixelColor(p, max_r, 0, 0);
+    }
+    else {
+      pixels.setPixelColor(p, 0, 0, 0);
+    }
+  }
+}
+
+
+void candle() {
+  //  Regular (orange) flame:
+    int r = 226, g = 121, b = 35;
+  //  Purple flame:
+  //  int r = 158, g = 8, b = 148;
+  //  Green flame:
+  //  int r = 74, g = 150, b = 12;
+
+  //  Flicker, based on our initial RGB values
+  for(int i=0; i<pixels.numPixels(); i++) {
+    int flicker = random(0,100);
+    int r1 = r-flicker;
+    int g1 = g-flicker;
+    int b1 = b-flicker;
+    if(g1<0) g1=0;
+    if(r1<0) r1=0;
+    if(b1<0) b1=0;
+    pixels.setPixelColor(i,r1,g1, b1);
+  }
+  pixels.show();
+
+  //  Adjust the delay here, if you'd like.  Right now, it randomizes the 
+  //  color switch delay to give a sense of realism
+  // delay(random(10,113));
+  delay(random(1, 15));
+}
+
 void setup() {
   // Initialize serial and wait for port to open:
   pinMode(LED_BUILTIN, OUTPUT);
@@ -283,7 +373,7 @@ void setup() {
   }
 
   if (lights_active) {
-    int tmp_col[3] = {random(max_r), 0, 0};
+    int tmp_col[3] = {random(max_r), random(max_g), random(max_b)};
     // load up the target and current colors array
     for (p=0; p<ledCount; p++) {
       rand_color(tmp_col);
@@ -354,20 +444,19 @@ void loop() {
       if (subscription == &modeslider) {
         Serial.println((char *)modeslider.lastread);
         if (!strcmp((char *)modeslider.lastread, "0")) {
-          Serial.println("compare 0");
           light_mode = 0;
         }
         if (!strcmp((char *)modeslider.lastread, "1")) {
-          Serial.println("compare 1");
           light_mode = 1;
         }
         if (!strcmp((char *)modeslider.lastread, "2")) {
-          Serial.println("compare 2");
           light_mode = 2;
         }
         if (!strcmp((char *)modeslider.lastread, "3")) {
-          Serial.println("compare 3");
           light_mode = 3;
+        }
+        if (!strcmp((char *)modeslider.lastread, "4")) {
+          light_mode=4;
         }
         Serial.print("Current mode: ");
         Serial.println(light_mode);
@@ -387,89 +476,19 @@ void loop() {
     }
     if (light_mode == 1) { // each pixel random colors
       light_delay = 0;
-      for (p=0; p<ledCount; p++) {
-        pixels.setPixelColor(p, cur[p][0], cur[p][1], cur[p][2]);
-  
-        // move this pixel's red closer to target
-        if (cur[p][0] > tar[p][0]) {
-          cur[p][0]--;
-        }
-        else if (cur[p][0] < tar[p][0]) {
-          cur[p][0] = cur[p][0] + light_step;
-        }
-        else {
-          tar[p][0] = random(max_r);
-        }
-  
-        // move this pixel's green closer to target
-        if (cur[p][1] > tar[p][1]) {
-          cur[p][1]--;
-        }
-        else if (cur[p][1] < tar[p][1]) {
-          cur[p][1] = cur[p][1] + light_step;
-        }
-        else {
-          tar[p][1] = random(max_g);
-        }
-  
-        if (cur[p][2] > tar[p][2]) {
-          cur[p][2]--;
-        }
-        else if (cur[p][2] < tar[p][2]) {
-          cur[p][2] = cur[p][2] + light_step;
-        }
-        else {
-          tar[p][2] = random(max_b);
-        }
-      }
+      random_color_indiv(cur, tar, light_step);
     }
     if (light_mode == 2) { // all pixels same random colors
       light_delay = 0;
-      for (p=0; p<ledCount; p++) {
-        pixels.setPixelColor(p, cur[0][0], cur[0][1], cur[0][2]);
-      }
-      // move this pixel's red closer to target
-      if (cur[0][0] > tar[0][0]) {
-        cur[0][0]--;
-      }
-      else if (cur[0][0] < tar[0][0]) {
-        cur[0][0] = cur[0][0] + light_step;
-      }
-      else {
-        tar[0][0] = random(max_r);
-      }
-
-      // move this pixel's green closer to target
-      if (cur[0][1] > tar[0][1]) {
-        cur[0][1]--;
-      }
-      else if (cur[0][1] < tar[0][1]) {
-        cur[0][1] = cur[0][1] + light_step;
-      }
-      else {
-        tar[0][1] = random(max_g);
-      }
-
-      if (cur[0][2] > tar[0][2]) {
-        cur[0][2]--;
-      }
-      else if (cur[0][2] < tar[0][2]) {
-        cur[0][2] = cur[0][2] + light_step;
-      }
-      else {
-        tar[0][2] = random(max_b);
-      }
+      random_color_all(cur, tar, light_step);
     }
     if (light_mode == 3) { // cylon chase
       light_delay = 125;
-      for (p=0; p<ledCount; p++) {
-        if (p == i) {
-          pixels.setPixelColor(p, max_r, 0, 0);
-        }
-        else {
-          pixels.setPixelColor(p, 0, 0, 0);
-        }
-      }
+      cylon_chase(i);
+    }
+    if (light_mode == 4) { // candle
+      light_delay=0;
+      candle();
     }
   }
 
